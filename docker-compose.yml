@@ -1,85 +1,67 @@
-version: "3.9"
-
-networks:
-  faultwall-net:
-    driver: bridge
+version: '3.9'
 
 services:
-  # ─────────────────────────────────────────────
-  # PostgreSQL 16 — the protected database
-  # ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: fw-postgres
-    restart: unless-stopped
     environment:
-      POSTGRES_DB: demo
-      POSTGRES_USER: demo
-      POSTGRES_PASSWORD: demo123
+      POSTGRES_DB: faultwall_demo
+      POSTGRES_USER: ghost
+      POSTGRES_PASSWORD: ghostpass
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./demo/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5432:5432"
-    volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - pgdata:/var/lib/postgresql/data
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_stat_statements
+        -c pg_stat_statements.track=all
+        -c pg_stat_statements.max=10000
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      test: ["CMD-SHELL", "pg_isready -U ghost -d faultwall_demo"]
       interval: 5s
       timeout: 5s
       retries: 10
-    networks:
-      - faultwall-net
 
-  # ─────────────────────────────────────────────
-  # FaultWall — the agentic data firewall proxy
-  # :5433 → PostgreSQL proxy (agents connect here)
-  # :8080 → REST audit/dashboard API
-  # ─────────────────────────────────────────────
-  faultwall:
-    build:
-      context: ./faultwall
-      dockerfile: Dockerfile
-    container_name: fw-proxy
-    restart: unless-stopped
-    environment:
-      # Upstream PostgreSQL connection
-      PG_HOST: postgres
-      PG_PORT: "5432"
-      PG_DATABASE: demo
-      PG_USER: demo
-      PG_PASSWORD: demo123
-      # FaultWall config
-      PROXY_PORT: "5433"
-      API_PORT: "8080"
-      POLICY_FILE: /etc/faultwall/policy.yaml
-      LOG_LEVEL: info
+  faultwall-proxy:
+    build: ./faultwall
     ports:
-      - "5433:5433"   # Agents connect here (SQL proxy)
-      - "8080:8080"   # Dashboard API (REST + SSE)
+      - "5433:5433"
+    environment:
+      POLICY_FILE: /app/policies.yaml
+      POLICY_ENFORCEMENT: enforce
     volumes:
-      - ./policy.yaml:/etc/faultwall/policy.yaml:ro
+      - ./demo/policies.yaml:/app/policies.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - faultwall-net
+    restart: on-failure
+    command: ["/app/faultwall", "--proxy", "--listen", "0.0.0.0:5433", "--upstream", "postgres:5432", "--policies", "/app/policies.yaml"]
 
-  # ─────────────────────────────────────────────
-  # Dashboard — live query log & visualizer
-  # ─────────────────────────────────────────────
+  faultwall-monitor:
+    build: ./faultwall
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://ghost:ghostpass@postgres:5432/faultwall_demo?sslmode=disable
+      POLICY_FILE: /app/policies.yaml
+      POLICY_ENFORCEMENT: enforce
+    volumes:
+      - ./demo/policies.yaml:/app/policies.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
   dashboard:
     image: nginx:alpine
-    container_name: fw-dashboard
-    restart: unless-stopped
     ports:
       - "3000:80"
     volumes:
       - ./dashboard/index.html:/usr/share/nginx/html/index.html:ro
       - ./dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - faultwall
-    networks:
-      - faultwall-net
+      - faultwall-monitor
 
 volumes:
-  pgdata:
-    driver: local
+  pg_data:

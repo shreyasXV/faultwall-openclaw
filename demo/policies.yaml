@@ -1,0 +1,119 @@
+# FaultWall × OpenClaw — Policy Configuration
+#
+# Agents identify themselves via PostgreSQL application_name:
+#   SET application_name = 'agent:<agent_id>:mission:<mission_id>:token:<token>';
+#
+# default_policy: deny | allow
+#   deny  = block any agent not explicitly listed
+#   allow = permit unlisted agents (only blocked_* rules apply)
+
+default_policy: deny
+
+# Global function blocklist — denied for ALL agents regardless of mission.
+# These functions can read OS files, kill backends, or exfiltrate data.
+blocked_functions:
+  - pg_sleep
+  - pg_terminate_backend
+  - pg_cancel_backend
+  - pg_reload_conf
+  - pg_rotate_logfile
+  - lo_export
+  - lo_import
+  - lo_unlink
+  - pg_read_file
+  - pg_read_binary_file
+  - pg_ls_dir
+  - pg_stat_file
+  - set_config
+  - dblink
+  - dblink_exec
+  - pg_execute_server_program
+
+agents:
+  openclaw-coder:
+    description: "OpenClaw coding agent — reads feedback and product data"
+    auth_token: "oc-coder-secret-abc"
+    missions:
+      read-feedback:
+        tables:
+          - "public.feedback"
+          - "public.products"
+        max_rows: 1000
+        max_query_time_ms: 5000
+
+      query-products:
+        tables:
+          - "public.products"
+        max_rows: 500
+        max_query_time_ms: 3000
+
+    blocked_operations:
+      - DROP
+      - TRUNCATE
+      - DELETE
+      - ALTER
+      - CREATE
+      - GRANT
+
+    blocked_tables:
+      - public.users
+      - public.payments
+      - pg_catalog.*
+
+  openclaw-research:
+    description: "OpenClaw research agent — read-only access to public catalog data"
+    auth_token: "oc-research-secret-def"
+    missions:
+      catalog-research:
+        tables:
+          - "public.products"
+          - "public.feedback"
+        max_rows: 5000
+        max_query_time_ms: 10000
+
+    blocked_operations:
+      - DROP
+      - TRUNCATE
+      - DELETE
+      - ALTER
+      - CREATE
+      - GRANT
+      - INSERT
+      - UPDATE
+
+    blocked_tables:
+      - public.users
+      - public.payments
+      - public.orders
+      - pg_catalog.*
+
+  openclaw-admin:
+    description: "OpenClaw admin agent — elevated access for operations and monitoring"
+    auth_token: "oc-admin-secret-ghi"
+    missions:
+      manage-orders:
+        tables:
+          - "public.orders"
+          - "public.products"
+          - "public.feedback"
+        max_rows: 10000
+        max_query_time_ms: 15000
+        conditions:
+          - "UPDATE must include WHERE clause"
+
+      review-feedback:
+        tables:
+          - "public.feedback"
+        max_rows: 5000
+
+    blocked_operations:
+      - DROP
+      - TRUNCATE
+
+    blocked_tables:
+      - public.users
+      - pg_catalog.*
+
+# Unidentified connections (no agent: prefix in application_name)
+unidentified:
+  policy: monitor

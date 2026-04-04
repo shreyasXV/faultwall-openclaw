@@ -877,31 +877,37 @@
 
 <script>
 /* ═══════════════════════════════════════════════════════════════
-   FaultWall Live Dashboard — Core Logic
+   FaultWall Live Dashboard — Real API Integration
+   Polls /api/firewall/agents + /api/violations from real FaultWall
+   Falls back to demo mode if FaultWall is unreachable
    ═══════════════════════════════════════════════════════════════ */
 
 const API_BASE = 'http://localhost:8080';
 const MAX_FEED_ITEMS = 100;
+const POLL_INTERVAL = 2000;
 
 // ── State ──────────────────────────────────────────────────────
 let state = {
   total: 0,
   allowed: 0,
   blocked: 0,
-  agents: {},       // { agentId: { allowed, blocked } }
+  agents: {},            // { agentId: { allowed, blocked, active, totalQueries, violations } }
   feedCount: 0,
   connected: false,
+  demoMode: false,
+  seenViolationKeys: new Set(),  // track violations we've already shown
+  lastViolationCount: 0,
 };
 
 // ── Agent Color Palette ────────────────────────────────────────
 const AGENT_COLORS = [
-  { bg: 'rgba(88,166,255,0.15)',  fg: '#58a6ff',  dot: '#58a6ff'  },  // blue
-  { bg: 'rgba(63,185,80,0.15)',   fg: '#3fb950',  dot: '#3fb950'  },  // green
-  { bg: 'rgba(188,140,255,0.15)', fg: '#bc8cff',  dot: '#bc8cff'  },  // purple
-  { bg: 'rgba(255,166,87,0.15)',  fg: '#ffa657',  dot: '#ffa657'  },  // orange
-  { bg: 'rgba(57,208,216,0.15)',  fg: '#39d0d8',  dot: '#39d0d8'  },  // cyan
-  { bg: 'rgba(247,120,186,0.15)', fg: '#f778ba',  dot: '#f778ba'  },  // pink
-  { bg: 'rgba(210,153,34,0.15)',  fg: '#d29922',  dot: '#d29922'  },  // yellow
+  { bg: 'rgba(88,166,255,0.15)',  fg: '#58a6ff',  dot: '#58a6ff'  },
+  { bg: 'rgba(63,185,80,0.15)',   fg: '#3fb950',  dot: '#3fb950'  },
+  { bg: 'rgba(188,140,255,0.15)', fg: '#bc8cff',  dot: '#bc8cff'  },
+  { bg: 'rgba(255,166,87,0.15)',  fg: '#ffa657',  dot: '#ffa657'  },
+  { bg: 'rgba(57,208,216,0.15)',  fg: '#39d0d8',  dot: '#39d0d8'  },
+  { bg: 'rgba(247,120,186,0.15)', fg: '#f778ba',  dot: '#f778ba'  },
+  { bg: 'rgba(210,153,34,0.15)',  fg: '#d29922',  dot: '#d29922'  },
 ];
 
 const agentColorMap = {};
@@ -934,38 +940,38 @@ function bumpValue(elId) {
   const el = document.getElementById(elId);
   if (!el) return;
   el.classList.remove('bump');
-  void el.offsetWidth;  // reflow
+  void el.offsetWidth;
   el.classList.add('bump');
 }
 
+function violationKey(v) {
+  return `${v.agent_id}|${v.query}|${v.timestamp}|${v.pid}`;
+}
+
 // ── Update Stats Display ───────────────────────────────────────
-function updateStatsDisplay(data) {
+function updateStatsDisplay() {
   const prevTotal   = parseInt(document.getElementById('stat-total').textContent)   || 0;
   const prevAllowed = parseInt(document.getElementById('stat-allowed').textContent) || 0;
   const prevBlocked = parseInt(document.getElementById('stat-blocked').textContent) || 0;
 
-  const total   = data.total_queries   ?? state.total;
-  const allowed = data.allowed_queries ?? state.allowed;
-  const blocked = data.blocked_queries ?? state.blocked;
   const agentCount = Object.keys(state.agents).length;
 
-  document.getElementById('stat-total').textContent   = total;
-  document.getElementById('stat-allowed').textContent = allowed;
-  document.getElementById('stat-blocked').textContent = blocked;
+  document.getElementById('stat-total').textContent   = state.total;
+  document.getElementById('stat-allowed').textContent = state.allowed;
+  document.getElementById('stat-blocked').textContent = state.blocked;
   document.getElementById('stat-agents').textContent  = agentCount;
 
-  if (total > 0) {
+  if (state.total > 0) {
     document.getElementById('stat-allowed-pct').textContent =
-      `${Math.round(allowed / total * 100)}% pass rate`;
+      `${Math.round(state.allowed / state.total * 100)}% pass rate`;
     document.getElementById('stat-blocked-pct').textContent =
-      `${Math.round(blocked / total * 100)}% block rate`;
+      `${Math.round(state.blocked / state.total * 100)}% block rate`;
   }
 
-  if (total   !== prevTotal)   bumpValue('stat-total');
-  if (allowed !== prevAllowed) bumpValue('stat-allowed');
-  if (blocked !== prevBlocked) {
+  if (state.total   !== prevTotal)   bumpValue('stat-total');
+  if (state.allowed !== prevAllowed) bumpValue('stat-allowed');
+  if (state.blocked !== prevBlocked) {
     bumpValue('stat-blocked');
-    // Pulse the blocked card
     const card = document.querySelector('.stat-card.blocked');
     card.classList.remove('pulsing');
     void card.offsetWidth;
@@ -988,7 +994,6 @@ function renderAgents() {
 
   if (ids.length === 0) {
     empty.style.display = 'block';
-    // Remove all agent cards
     list.querySelectorAll('.agent-card').forEach(el => el.remove());
     return;
   }
@@ -1000,47 +1005,46 @@ function renderAgents() {
     const allowedPct = total > 0 ? (stats.allowed / total * 100) : 0;
     const blockedPct = total > 0 ? (stats.blocked / total * 100) : 0;
     const color = getAgentColor(id);
+    const safeId = id.replace(/[^a-z0-9]/gi, '-');
 
-    let card = document.getElementById(`agent-card-${CSS.escape(id)}`);
+    let card = document.getElementById(`agent-card-${safeId}`);
     if (!card) {
       card = document.createElement('div');
       card.className = 'agent-card';
-      card.id = `agent-card-${id.replace(/[^a-z0-9]/gi, '-')}`;
+      card.id = `agent-card-${safeId}`;
       card.innerHTML = `
         <div class="agent-card-header">
           <div class="agent-name-wrap">
             <div class="agent-dot" style="background:${color.dot}"></div>
             <span class="agent-name">${esc(id)}</span>
           </div>
-          <span class="agent-total" id="agt-total-${esc(id)}">0 queries</span>
+          <span class="agent-total" data-agent="${esc(id)}">0 queries</span>
         </div>
         <div class="agent-counts">
           <div class="agent-count-item">
             <div class="dot" style="background:#3fb950"></div>
             <span style="color:var(--text-secondary)">Allow:</span>
-            <span class="count-val" style="color:var(--green)" id="agt-allowed-${esc(id)}">0</span>
+            <span class="count-val" style="color:var(--green)" data-agent-allowed="${esc(id)}">0</span>
           </div>
           <div class="agent-count-item">
             <div class="dot" style="background:#f85149"></div>
             <span style="color:var(--text-secondary)">Block:</span>
-            <span class="count-val" style="color:var(--red)" id="agt-blocked-${esc(id)}">0</span>
+            <span class="count-val" style="color:var(--red)" data-agent-blocked="${esc(id)}">0</span>
           </div>
         </div>
         <div class="agent-bar-track">
-          <div class="agent-bar-allowed" id="agt-bar-a-${esc(id)}" style="width:0%"></div>
-          <div class="agent-bar-blocked" id="agt-bar-b-${esc(id)}" style="width:0%"></div>
+          <div class="agent-bar-allowed" data-agent-bar-a="${esc(id)}" style="width:0%"></div>
+          <div class="agent-bar-blocked" data-agent-bar-b="${esc(id)}" style="width:0%"></div>
         </div>
       `;
       list.appendChild(card);
     }
 
-    // Update values
-    const safeId = id; // Already set via esc in IDs
-    const totalEl    = document.getElementById(`agt-total-${id}`);
-    const allowedEl  = document.getElementById(`agt-allowed-${id}`);
-    const blockedEl  = document.getElementById(`agt-blocked-${id}`);
-    const barAllowed = document.getElementById(`agt-bar-a-${id}`);
-    const barBlocked = document.getElementById(`agt-bar-b-${id}`);
+    const totalEl    = card.querySelector(`[data-agent="${id}"]`);
+    const allowedEl  = card.querySelector(`[data-agent-allowed="${id}"]`);
+    const blockedEl  = card.querySelector(`[data-agent-blocked="${id}"]`);
+    const barAllowed = card.querySelector(`[data-agent-bar-a="${id}"]`);
+    const barBlocked = card.querySelector(`[data-agent-bar-b="${id}"]`);
 
     if (totalEl)    totalEl.textContent    = `${total} quer${total !== 1 ? 'ies' : 'y'}`;
     if (allowedEl)  allowedEl.textContent  = stats.allowed;
@@ -1060,158 +1064,143 @@ function addFeedItem(event) {
   document.getElementById('feed-count').textContent =
     `${state.feedCount} event${state.feedCount !== 1 ? 's' : ''}`;
 
-  const isBlocked = event.status === 'blocked' || event.allowed === false;
+  const isBlocked = event.action === 'blocked' || event.status === 'blocked' || event.allowed === false;
   const isAllowed = !isBlocked;
   const agentId   = event.agent_id || event.agent || 'unknown';
   const query     = event.query    || event.sql   || '(no query)';
   const reason    = event.reason   || '';
+  const operation = event.operation || '';
+  const table     = event.table    || '';
   const ts        = formatTime(event.timestamp);
   const color     = getAgentColor(agentId);
 
-  // Update agent state
-  if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
-  if (isAllowed) {
-    state.agents[agentId].allowed++;
-    state.total++;
-    state.allowed++;
-  } else {
-    state.agents[agentId].blocked++;
-    state.total++;
-    state.blocked++;
-  }
-
   const item = document.createElement('div');
   item.className = `feed-item ${isAllowed ? 'allowed-flash' : 'blocked-flash'} ${isBlocked ? 'is-blocked' : ''}`;
+
+  const reasonLine = reason
+    ? `<div class="feed-reason">⚠ ${esc(reason)}${table ? ` (${esc(operation)} on ${esc(table)})` : ''}</div>`
+    : '';
 
   item.innerHTML = `
     <span class="feed-time">${esc(ts)}</span>
     <span class="agent-badge" style="background:${color.bg}; color:${color.fg}; border: 1px solid ${color.fg}30">${esc(agentId)}</span>
     <div class="feed-query-wrap">
       <div class="feed-query" title="${esc(query)}">${esc(query)}</div>
-      ${reason ? `<div class="feed-reason">⚠ ${esc(reason)}</div>` : ''}
+      ${reasonLine}
     </div>
     <div class="feed-status ${isAllowed ? 'allowed' : 'blocked'}">${isAllowed ? '✓' : '✕'}</div>
   `;
 
-  // Prepend (newest on top)
   feedList.insertBefore(item, feedList.children[1] || null);
 
-  // Prune old items
   const items = feedList.querySelectorAll('.feed-item');
   if (items.length > MAX_FEED_ITEMS) {
     items[items.length - 1].remove();
   }
-
-  // Update stats display from local state
-  updateStatsDisplay({ total_queries: state.total, allowed_queries: state.allowed, blocked_queries: state.blocked });
-  renderAgents();
 }
 
-// ── SSE Connection ─────────────────────────────────────────────
-let sseRetryDelay = 2000;
-let sseRetryTimer = null;
-
-function connectSSE() {
-  const statusEl = document.getElementById('connection-status');
+// ── Connection Status ──────────────────────────────────────────
+function setConnected(connected) {
   const badge    = document.getElementById('live-badge');
   const liveText = document.getElementById('live-text');
+  const statusEl = document.getElementById('connection-status');
 
-  statusEl.textContent = 'Connecting to SSE…';
-
-  let es;
-  try {
-    es = new EventSource(`${API_BASE}/events`);
-  } catch(e) {
-    scheduleSSERetry();
-    return;
-  }
-
-  es.onopen = () => {
-    state.connected = true;
-    sseRetryDelay = 2000;
+  if (connected && !state.connected) {
     badge.classList.remove('disconnected');
     liveText.textContent = 'LIVE';
-    statusEl.textContent = 'SSE connected';
+    statusEl.textContent = 'Polling FaultWall API';
     showToast('Connected to FaultWall', 'success');
-  };
-
-  es.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.type === 'query' || data.query || data.sql) {
-        addFeedItem(data);
-      } else if (data.type === 'stats') {
-        updateStatsDisplay(data);
-      }
-    } catch(err) {
-      console.warn('SSE parse error', err, e.data);
-    }
-  };
-
-  // Also listen for named event types
-  ['query', 'event', 'blocked', 'allowed'].forEach(evtType => {
-    es.addEventListener(evtType, (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        addFeedItem({ ...data, type: evtType });
-      } catch(err) {
-        console.warn('SSE named event parse error', err);
-      }
-    });
-  });
-
-  es.onerror = () => {
-    state.connected = false;
+  } else if (!connected && state.connected) {
     badge.classList.add('disconnected');
     liveText.textContent = 'OFFLINE';
-    statusEl.textContent = `Reconnecting in ${sseRetryDelay/1000}s…`;
-    es.close();
-    scheduleSSERetry();
-  };
+    statusEl.textContent = 'FaultWall unreachable — demo mode';
+    state.demoMode = true;
+  }
+  state.connected = connected;
 }
 
-function scheduleSSERetry() {
-  clearTimeout(sseRetryTimer);
-  sseRetryTimer = setTimeout(() => {
-    connectSSE();
-    sseRetryDelay = Math.min(sseRetryDelay * 1.5, 15000);
-  }, sseRetryDelay);
-}
-
-// ── Stats Polling ──────────────────────────────────────────────
-async function fetchStats() {
+// ── Poll /api/firewall/agents ──────────────────────────────────
+async function pollAgents() {
   try {
-    const resp = await fetch(`${API_BASE}/stats`, { signal: AbortSignal.timeout(3000) });
+    const resp = await fetch(`${API_BASE}/api/firewall/agents`, { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) { setConnected(false); return; }
+    const data = await resp.json();
+    setConnected(true);
+
+    let totalQueries = 0;
+    let totalViolations = 0;
+
+    if (data.agents && Array.isArray(data.agents)) {
+      data.agents.forEach(agent => {
+        const id = agent.agent_id || 'unknown';
+        const queries = agent.total_queries || 0;
+        const violations = agent.violations || 0;
+        const allowed = queries - violations;
+
+        if (!state.agents[id]) state.agents[id] = { allowed: 0, blocked: 0 };
+        state.agents[id].allowed = Math.max(allowed, 0);
+        state.agents[id].blocked = violations;
+
+        totalQueries += queries;
+        totalViolations += violations;
+      });
+    }
+
+    state.total = totalQueries;
+    state.blocked = totalViolations;
+    state.allowed = totalQueries - totalViolations;
+
+    updateStatsDisplay();
+    renderAgents();
+  } catch(e) {
+    setConnected(false);
+  }
+}
+
+// ── Poll /api/violations ───────────────────────────────────────
+async function pollViolations() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/violations`, { signal: AbortSignal.timeout(3000) });
     if (!resp.ok) return;
     const data = await resp.json();
-    updateStatsDisplay(data);
 
-    // Merge per-agent stats from API
-    if (data.agents) {
-      Object.entries(data.agents).forEach(([id, agentData]) => {
-        if (!state.agents[id]) state.agents[id] = { allowed: 0, blocked: 0 };
-        // Use API values as source of truth if they're higher
-        if ((agentData.allowed || 0) > state.agents[id].allowed)
-          state.agents[id].allowed = agentData.allowed || 0;
-        if ((agentData.blocked || 0) > state.agents[id].blocked)
-          state.agents[id].blocked = agentData.blocked || 0;
+    if (data.violations && Array.isArray(data.violations)) {
+      // Violations come newest-first from API. Find new ones.
+      const newViolations = [];
+      for (const v of data.violations) {
+        const key = violationKey(v);
+        if (!state.seenViolationKeys.has(key)) {
+          state.seenViolationKeys.add(key);
+          newViolations.push(v);
+        }
+      }
+
+      // Add new violations to feed (oldest first so newest ends up on top)
+      newViolations.reverse().forEach(v => {
+        addFeedItem({
+          agent_id: v.agent_id,
+          query: v.query,
+          reason: v.reason,
+          table: v.table,
+          operation: v.operation,
+          action: v.action || 'blocked',
+          timestamp: v.timestamp,
+          status: 'blocked',
+        });
       });
-      renderAgents();
-    }
 
-    // Sync totals
-    if (data.total_queries !== undefined) {
-      state.total   = data.total_queries   || 0;
-      state.allowed = data.allowed_queries || 0;
-      state.blocked = data.blocked_queries || 0;
+      if (newViolations.length > 0) {
+        showToast(`🚫 ${newViolations.length} new violation${newViolations.length > 1 ? 's' : ''} detected`, 'error');
+      }
     }
-
   } catch(e) {
-    // silently ignore fetch errors
+    // silently ignore
   }
 }
 
 // ── Simulate Attack Buttons ────────────────────────────────────
+// FaultWall is a wire-protocol proxy — queries go through psql on port 5433,
+// not through REST. Attack buttons simulate in demo mode or show psql commands.
 async function fireQuery(agentId, query, btn) {
   if (btn.disabled) return;
   btn.disabled = true;
@@ -1222,38 +1211,80 @@ async function fireQuery(agentId, query, btn) {
     btn.classList.remove('firing');
   }, 800);
 
-  try {
-    const resp = await fetch(`${API_BASE}/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: agentId, query: query }),
-      signal: AbortSignal.timeout(5000),
+  // Determine if this query would be blocked based on common patterns
+  const dangerOps = /DROP|DELETE|TRUNCATE|ALTER|INSERT INTO.*secrets/i;
+  const secretsTables = /\bsecrets\b/i;
+  const isAdmin = agentId === 'admin-agent';
+  const isDangerous = dangerOps.test(query) || secretsTables.test(query);
+  const wouldBlock = isDangerous && !isAdmin;
+
+  if (state.connected && !state.demoMode) {
+    // In live mode: the buttons can't send queries through the wire protocol.
+    // Instead, show the psql command and trigger a poll to pick up results.
+    const psqlCmd = `PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d faultwall_demo -c "${query}" --set=application_name=${agentId}`;
+
+    // Add to feed as a "pending" item
+    addFeedItem({
+      agent_id: agentId,
+      query: query,
+      status: wouldBlock ? 'blocked' : 'allowed',
+      action: wouldBlock ? 'blocked' : 'allowed',
+      reason: wouldBlock ? 'Simulated — run via psql or attack-demo.sh for real interception' : '',
+      timestamp: new Date().toISOString(),
     });
 
-    if (resp.ok) {
-      const data = await resp.json();
-      // If SSE doesn't deliver it, add it manually
-      if (!state.connected) {
-        addFeedItem({
-          agent_id: agentId,
-          query: query,
-          status: data.allowed === false ? 'blocked' : 'allowed',
-          allowed: data.allowed,
-          reason: data.reason || '',
-          timestamp: new Date().toISOString(),
-        });
-      }
-      showToast(
-        data.allowed === false
-          ? `🚫 Blocked: ${data.reason || 'policy violation'}`
-          : `✅ Query allowed for ${agentId}`,
-        data.allowed === false ? 'error' : 'success'
-      );
+    // Update local counters for immediate visual feedback
+    if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
+    if (wouldBlock) {
+      state.agents[agentId].blocked++;
+      state.blocked++;
     } else {
-      showToast(`HTTP ${resp.status} from FaultWall`, 'error');
+      state.agents[agentId].allowed++;
+      state.allowed++;
     }
-  } catch(e) {
-    showToast(`Failed to reach FaultWall: ${e.message}`, 'error');
+    state.total++;
+    updateStatsDisplay();
+    renderAgents();
+
+    showToast(
+      wouldBlock
+        ? `🚫 Would be blocked: ${query.substring(0, 40)}…`
+        : `✅ Would be allowed for ${agentId}`,
+      wouldBlock ? 'error' : 'success'
+    );
+
+    // Trigger immediate poll to pick up any real results
+    setTimeout(() => { pollViolations(); pollAgents(); }, 500);
+
+  } else {
+    // Demo mode — simulate locally
+    addFeedItem({
+      agent_id: agentId,
+      query: query,
+      status: wouldBlock ? 'blocked' : 'allowed',
+      action: wouldBlock ? 'blocked' : 'allowed',
+      reason: wouldBlock ? (secretsTables.test(query) ? 'Blocked table: secrets' : `Blocked operation: ${query.split(' ')[0]}`) : '',
+      timestamp: new Date().toISOString(),
+    });
+
+    if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
+    if (wouldBlock) {
+      state.agents[agentId].blocked++;
+      state.blocked++;
+    } else {
+      state.agents[agentId].allowed++;
+      state.allowed++;
+    }
+    state.total++;
+    updateStatsDisplay();
+    renderAgents();
+
+    showToast(
+      wouldBlock
+        ? `🚫 Blocked: ${secretsTables.test(query) ? 'blocked table access' : 'dangerous operation'}`
+        : `✅ Query allowed for ${agentId}`,
+      wouldBlock ? 'error' : 'success'
+    );
   }
 }
 
@@ -1272,9 +1303,25 @@ function showToast(msg, type = 'success') {
 
 // ── Init ───────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  connectSSE();
-  fetchStats();
-  setInterval(fetchStats, 2000);
+  const statusEl = document.getElementById('connection-status');
+  statusEl.textContent = 'Connecting to FaultWall…';
+
+  // Initial fetch
+  pollAgents();
+  pollViolations();
+
+  // Poll every 2 seconds
+  setInterval(pollAgents, POLL_INTERVAL);
+  setInterval(pollViolations, POLL_INTERVAL);
+
+  // If no connection after 5s, enter demo mode
+  setTimeout(() => {
+    if (!state.connected) {
+      state.demoMode = true;
+      statusEl.textContent = 'Demo mode — click attack buttons to simulate';
+      showToast('Demo mode: FaultWall not detected, simulating locally', 'error');
+    }
+  }, 5000);
 });
 </script>
 </body>

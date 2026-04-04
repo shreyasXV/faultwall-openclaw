@@ -1,0 +1,148 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FaultWall Policy Configuration
+# Version: 1
+#
+# This file is the single source of truth for what each agent can do.
+# FaultWall evaluates every inbound SQL query against these rules BEFORE
+# the query reaches PostgreSQL.
+#
+# Evaluation order:
+#   1. Identify agent by connection username
+#   2. If no matching agent, apply 'default' policy
+#   3. Check operation type (SELECT / INSERT / UPDATE / DELETE / DDL)
+#   4. Check table name against allow/deny lists
+#   5. Check rate limits
+#   6. ALLOW or BLOCK + emit audit event
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1"
+
+# Global defaults — applied before agent-specific rules
+global:
+  # Audit every query (allowed and blocked) to the event log
+  audit_all: true
+
+  # Block any DDL by default unless explicitly allowed by an agent policy
+  default_deny_ddl: true
+
+  # Emit structured JSON audit events to stdout and the API
+  audit_format: json
+
+agents:
+
+  # ───────────────────────────────────────────
+  # data-analyst
+  # A standard AI agent used for reporting and
+  # business intelligence queries.
+  # Principle: can read what it needs. Nothing more.
+  # ───────────────────────────────────────────
+  data-analyst:
+    description: "BI / analytics agent — read-only access to business tables"
+
+    allow:
+      # Tables this agent is permitted to query
+      tables:
+        - customers
+        - orders
+      # Only SELECT is permitted — no mutations
+      operations:
+        - SELECT
+
+    deny:
+      # Explicitly block access to the secrets table
+      # (belt AND suspenders — even if someone widens the allow list above)
+      tables:
+        - secrets
+      # Block all mutation and DDL operations
+      operations:
+        - INSERT
+        - UPDATE
+        - DELETE
+        - DROP
+        - TRUNCATE
+        - ALTER
+        - CREATE
+        - GRANT
+        - REVOKE
+
+    rate_limit:
+      # Max queries this agent may execute in a rolling 60-second window
+      queries_per_minute: 10
+      # What to do when the limit is hit: 'block' returns an error, 'queue' delays
+      on_limit: block
+
+  # ───────────────────────────────────────────
+  # admin-agent
+  # Privileged agent used for maintenance tasks.
+  # Full access — use sparingly.
+  # ───────────────────────────────────────────
+  admin-agent:
+    description: "Administrative agent — full database access"
+
+    allow:
+      # Wildcard: allow all tables
+      tables:
+        - "*"
+      # Wildcard: allow all operations
+      operations:
+        - "*"
+
+    deny: {}
+
+    rate_limit:
+      # Even admins have a rate limit — prevents runaway agents
+      queries_per_minute: 10
+      on_limit: block
+
+  # ───────────────────────────────────────────
+  # default
+  # Fallback policy for any agent not explicitly
+  # named above. Minimal permissions — read-only
+  # on the customers table only.
+  # ───────────────────────────────────────────
+  default:
+    description: "Fallback policy for unknown agents — minimal read access"
+
+    allow:
+      tables:
+        - customers
+      operations:
+        - SELECT
+
+    deny:
+      # Explicitly deny everything else
+      tables:
+        - "*"
+      operations:
+        - INSERT
+        - UPDATE
+        - DELETE
+        - DROP
+        - TRUNCATE
+        - ALTER
+        - CREATE
+        - GRANT
+        - REVOKE
+
+    rate_limit:
+      queries_per_minute: 10
+      on_limit: block
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audit log configuration
+# ─────────────────────────────────────────────────────────────────────────────
+audit:
+  # Retain the last N events in memory (served via the dashboard API)
+  buffer_size: 1000
+
+  # Fields included in every audit event
+  fields:
+    - timestamp
+    - agent
+    - operation
+    - tables
+    - query_hash
+    - decision       # ALLOW | BLOCK
+    - reason         # Human-readable policy reason
+    - duration_ms    # Time to evaluate policy
+    - remote_addr    # Agent IP address

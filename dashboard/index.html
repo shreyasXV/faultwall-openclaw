@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FaultWall Shield 🛡️ — Cage the Claw Demo</title>
+  <style>
+    /* ─── CSS Variables ─────────────────────────────────────────── */
+    :root {
+      --bg-base:       #0a0c10;
+      --bg-surface:    #111318;
+      --bg-card:       #161b22;
+      --bg-card-hover: #1c2230;
+      --border:        #21262d;
+      --border-glow:   #30363d;
+
+      --text-primary:  #e6edf3;
+      --text-secondary:#8b949e;
+      --text-muted:    #484f58;
+
+      --green:         #3fb950;
+      --green-dim:     #1a4726;
+      --green-glow:    rgba(63,185,80,0.25);
+      --red:           #f85149;
+      --red-dim:       #4a1010;
+      --red-glow:      rgba(248,81,73,0.30);
+      --yellow:        #d29922;
+      --blue:          #58a6ff;
+      --purple:        #bc8cff;
+      --orange:        #ffa657;
+      --cyan:          #39d0d8;
+      --pink:          #f778ba;
+
+      --accent:        #238636;
+      --radius:        10px;
+      --radius-sm:     6px;
+      --font-mono:     'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      --font-ui:       'Inter', system-ui, -apple-system, sans-serif;
+
+      --transition:    0.2s ease;
+      --shadow:        0 4px 24px rgba(0,0,0,0.5);
+    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      overflow: hidden;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: var(--border-glow); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* ─── Layout Shell ──────────────────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-rows: 56px auto 1fr auto;
+      height: 100vh;
+      gap: 0;
+    }
+
+    /* ─── Top Bar ───────────────────────────────────────────────── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: linear-gradient(90deg, #0d1117 0%, #111318 60%, #0d1117 100%);
+      border-bottom: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+      z-index: 10;
+    }
+
+    #topbar::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(63,185,80,0.04) 30%,
+        rgba(88,166,255,0.04) 70%,
+        transparent 100%);
+      pointer-events: none;
+    }
+
+    #topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #topbar-logo {
+      font-size: 22px;
+      filter: drop-shadow(0 0 8px rgba(63,185,80,0.6));
+      animation: shieldPulse 3s ease-in-out infinite;
+    }
+
+    @keyframes shieldPulse {
+      0%, 100% { filter: drop-shadow(0 0 6px rgba(63,185,80,0.5)); }
+      50% { filter: drop-shadow(0 0 14px rgba(63,185,80,0.9)); }
+    }
+
+    #topbar-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      background: linear-gradient(90deg, #e6edf3 0%, #8b949e 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #topbar-title span.highlight {
+      background: linear-gradient(90deg, #3fb950, #58a6ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    #live-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(63,185,80,0.12);
+      border: 1px solid rgba(63,185,80,0.3);
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--green);
+      transition: var(--transition);
+    }
+
+    #live-badge.disconnected {
+      background: rgba(248,81,73,0.12);
+      border-color: rgba(248,81,73,0.3);
+      color: var(--red);
+    }
+
+    #live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: livePulse 1.4s ease-in-out infinite;
+    }
+
+    #live-badge.disconnected #live-dot {
+      background: var(--red);
+      animation: none;
+    }
+
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    #connection-status {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Stats Row ─────────────────────────────────────────────── */
+    #stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 12px 24px;
+      background: var(--bg-base);
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 2px;
+      border-radius: 0 0 var(--radius) var(--radius);
+      transition: opacity var(--transition);
+    }
+
+    .stat-card.total::after   { background: var(--blue); }
+    .stat-card.allowed::after { background: var(--green); }
+    .stat-card.blocked::after { background: var(--red); }
+    .stat-card.agents::after  { background: var(--purple); }
+
+    .stat-card:hover {
+      border-color: var(--border-glow);
+      box-shadow: var(--shadow);
+    }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-secondary);
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      transition: transform 0.15s ease;
+    }
+
+    .stat-card.total   .stat-value { color: var(--blue); }
+    .stat-card.allowed .stat-value { color: var(--green); }
+    .stat-card.blocked .stat-value { color: var(--red); }
+    .stat-card.agents  .stat-value { color: var(--purple); }
+
+    .stat-value.bump {
+      animation: valueBump 0.3s ease;
+    }
+
+    @keyframes valueBump {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.18); }
+      100% { transform: scale(1); }
+    }
+
+    .stat-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Main Area ─────────────────────────────────────────────── */
+    #main {
+      display: grid;
+      grid-template-columns: 60% 40%;
+      gap: 0;
+      overflow: hidden;
+      padding: 0 24px 12px;
+      gap: 12px;
+    }
+
+    /* ─── Panel Base ────────────────────────────────────────────── */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.015);
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-title .icon { font-size: 14px; }
+
+    .panel-badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Query Feed ────────────────────────────────────────────── */
+    #feed-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+
+    .feed-item {
+      display: grid;
+      grid-template-columns: 70px auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      animation: slideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transition: background var(--transition);
+      position: relative;
+    }
+
+    .feed-item:hover {
+      background: rgba(255,255,255,0.025);
+    }
+
+    .feed-item.allowed-flash {
+      animation: slideIn 0.35s cubic-bezier(0.34,1.56,0.64,1), allowedFlash 0.7s ease forwards;
+    }
+
+    .feed-item.blocked-flash {
+      animation: slideIn 0.35s cubic-bezier(0.34,1.56,0.64,1), blockedFlash 0.9s ease forwards;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes allowedFlash {
+      0%   { background: rgba(63,185,80,0.25); }
+      100% { background: transparent; }
+    }
+
+    @keyframes blockedFlash {
+      0%   { background: rgba(248,81,73,0.30); }
+      30%  { background: rgba(248,81,73,0.18); }
+      60%  { background: rgba(248,81,73,0.30); }
+      100% { background: transparent; }
+    }
+
+    .feed-time {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .agent-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+      letter-spacing: 0.3px;
+    }
+
+    .feed-query-wrap {
+      min-width: 0;
+    }
+
+    .feed-query {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+
+    .feed-reason {
+      font-size: 10px;
+      color: var(--red);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .feed-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .feed-status.allowed {
+      background: var(--green-dim);
+      color: var(--green);
+      box-shadow: 0 0 0 0 var(--green-glow);
+      animation: allowedPop 0.4s ease forwards;
+    }
+
+    .feed-status.blocked {
+      background: var(--red-dim);
+      color: var(--red);
+      animation: blockedPop 0.6s ease forwards;
+    }
+
+    @keyframes allowedPop {
+      0% { transform: scale(0); opacity: 0; }
+      60% { transform: scale(1.3); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    @keyframes blockedPop {
+      0% { transform: scale(0) rotate(-45deg); opacity: 0; }
+      50% { transform: scale(1.4) rotate(5deg); }
+      70% { transform: scale(0.9) rotate(0deg); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Blocked item — left border pulse */
+    .feed-item.is-blocked::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--red);
+      animation: borderPulse 1.5s ease infinite;
+    }
+
+    @keyframes borderPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .feed-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 12px;
+      color: var(--text-muted);
+    }
+
+    .feed-empty .empty-icon { font-size: 40px; opacity: 0.4; }
+    .feed-empty .empty-text { font-size: 13px; }
+
+    /* ─── Agent Breakdown ───────────────────────────────────────── */
+    #agent-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .agent-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      animation: fadeUp 0.4s ease;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .agent-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .agent-name-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .agent-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .agent-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .agent-total {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .agent-counts {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .agent-count-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+    }
+
+    .agent-count-item .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+    }
+
+    .count-val {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Mini bar chart */
+    .agent-bar-track {
+      height: 6px;
+      background: var(--bg-base);
+      border-radius: 3px;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .agent-bar-allowed {
+      height: 100%;
+      background: linear-gradient(90deg, #2ea043, #3fb950);
+      border-radius: 3px 0 0 3px;
+      transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+      position: relative;
+    }
+
+    .agent-bar-blocked {
+      height: 100%;
+      background: linear-gradient(90deg, #da3633, #f85149);
+      border-radius: 0 3px 3px 0;
+      transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    .agent-empty {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 40px 0;
+    }
+
+    /* ─── Attack Panel ──────────────────────────────────────────── */
+    #attack-panel {
+      padding: 10px 24px 14px;
+      background: var(--bg-base);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    #attack-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #attack-label::before {
+      content: '⚡';
+      font-size: 12px;
+    }
+
+    #attack-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .attack-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border: 1px solid;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      position: relative;
+      overflow: hidden;
+      outline: none;
+      user-select: none;
+    }
+
+    .attack-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+
+    .attack-btn:hover::before { opacity: 1; }
+    .attack-btn:active { transform: scale(0.96); }
+
+    .attack-btn.safe {
+      background: rgba(63,185,80,0.1);
+      border-color: rgba(63,185,80,0.35);
+      color: var(--green);
+    }
+    .attack-btn.safe::before { background: rgba(63,185,80,0.08); }
+    .attack-btn.safe:hover { box-shadow: 0 0 12px rgba(63,185,80,0.3); border-color: var(--green); }
+
+    .attack-btn.danger {
+      background: rgba(248,81,73,0.1);
+      border-color: rgba(248,81,73,0.35);
+      color: var(--red);
+    }
+    .attack-btn.danger::before { background: rgba(248,81,73,0.08); }
+    .attack-btn.danger:hover { box-shadow: 0 0 14px rgba(248,81,73,0.35); border-color: var(--red); }
+
+    .attack-btn.admin {
+      background: rgba(188,140,255,0.1);
+      border-color: rgba(188,140,255,0.35);
+      color: var(--purple);
+    }
+    .attack-btn.admin::before { background: rgba(188,140,255,0.08); }
+    .attack-btn.admin:hover { box-shadow: 0 0 12px rgba(188,140,255,0.3); border-color: var(--purple); }
+
+    .attack-btn.firing {
+      animation: btnFire 0.4s ease;
+    }
+
+    @keyframes btnFire {
+      0% { transform: scale(1); }
+      30% { transform: scale(0.93); }
+      70% { transform: scale(1.04); }
+      100% { transform: scale(1); }
+    }
+
+    .attack-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ─── Toast Notifications ───────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      top: 70px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid;
+      animation: toastIn 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
+      max-width: 280px;
+    }
+
+    .toast.success {
+      background: rgba(63,185,80,0.15);
+      border-color: rgba(63,185,80,0.4);
+      color: var(--green);
+    }
+
+    .toast.error {
+      background: rgba(248,81,73,0.15);
+      border-color: rgba(248,81,73,0.4);
+      color: var(--red);
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateX(30px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(30px); }
+    }
+
+    /* ─── Scanning line effect on top bar ──────────────────────── */
+    #topbar .scan-line {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: linear-gradient(180deg, transparent, rgba(63,185,80,0.6), transparent);
+      animation: scanMove 4s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes scanMove {
+      from { left: -10px; opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      to   { left: calc(100% + 10px); opacity: 0; }
+    }
+
+    /* ─── Grid BG texture ───────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #app { position: relative; z-index: 1; }
+
+    /* ─── Blocked count flicker on stat card ─────────────────────*/
+    @keyframes blockedCardPulse {
+      0%, 100% { box-shadow: none; }
+      50% { box-shadow: 0 0 20px rgba(248,81,73,0.4), inset 0 0 10px rgba(248,81,73,0.05); }
+    }
+
+    .stat-card.blocked.pulsing {
+      animation: blockedCardPulse 0.8s ease;
+    }
+
+    /* ─── Responsive tweak ───────────────────────────────────────*/
+    @media (max-width: 900px) {
+      #main { grid-template-columns: 1fr; overflow-y: auto; }
+      #stats-row { grid-template-columns: repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Top Bar ────────────────────────────────────────────────── -->
+  <header id="topbar">
+    <div class="scan-line"></div>
+    <div id="topbar-left">
+      <span id="topbar-logo">🛡️</span>
+      <span id="topbar-title">
+        <span class="highlight">FaultWall</span> Shield — Cage the Claw Demo
+      </span>
+    </div>
+    <div id="topbar-right">
+      <span id="connection-status">Connecting…</span>
+      <div id="live-badge" class="disconnected">
+        <div id="live-dot"></div>
+        <span id="live-text">OFFLINE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Stats Row ─────────────────────────────────────────────── -->
+  <section id="stats-row">
+    <div class="stat-card total">
+      <div class="stat-label">Total Queries</div>
+      <div class="stat-value" id="stat-total">0</div>
+      <div class="stat-sub">all time</div>
+    </div>
+    <div class="stat-card allowed">
+      <div class="stat-label">✓ Allowed</div>
+      <div class="stat-value" id="stat-allowed">0</div>
+      <div class="stat-sub" id="stat-allowed-pct">—</div>
+    </div>
+    <div class="stat-card blocked">
+      <div class="stat-label">✕ Blocked</div>
+      <div class="stat-value" id="stat-blocked">0</div>
+      <div class="stat-sub" id="stat-blocked-pct">—</div>
+    </div>
+    <div class="stat-card agents">
+      <div class="stat-label">Agents Active</div>
+      <div class="stat-value" id="stat-agents">0</div>
+      <div class="stat-sub">unique agents</div>
+    </div>
+  </section>
+
+  <!-- ── Main Content ───────────────────────────────────────────── -->
+  <main id="main">
+
+    <!-- Live Query Feed -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">📡</span>
+          Live Query Feed
+        </div>
+        <span class="panel-badge" id="feed-count">0 events</span>
+      </div>
+      <div id="feed-list">
+        <div class="feed-empty" id="feed-empty">
+          <span class="empty-icon">🔍</span>
+          <span class="empty-text">Waiting for queries…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Breakdown -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">🤖</span>
+          Agent Breakdown
+        </div>
+        <span class="panel-badge" id="agent-count">0 agents</span>
+      </div>
+      <div id="agent-list">
+        <div class="agent-empty" id="agent-empty">No agent activity yet</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── Attack Panel ───────────────────────────────────────────── -->
+  <footer id="attack-panel">
+    <div id="attack-label">Simulate Attack</div>
+    <div id="attack-buttons">
+      <button class="attack-btn safe" onclick="fireQuery('data-analyst', 'SELECT id, name FROM users LIMIT 10', this)">
+        ✅ Safe Query (SELECT)
+      </button>
+      <button class="attack-btn danger" onclick="fireQuery('data-analyst', 'SELECT * FROM secrets', this)">
+        🔓 Steal Secrets
+      </button>
+      <button class="attack-btn danger" onclick="fireQuery('default', 'DROP TABLE customers', this)">
+        💣 Drop Table Attack
+      </button>
+      <button class="attack-btn danger" onclick="fireQuery('data-analyst', 'DELETE FROM orders WHERE 1=1', this)">
+        🗑️ Delete All Orders
+      </button>
+      <button class="attack-btn admin" onclick="fireQuery('admin-agent', 'DROP TABLE customers', this)">
+        👑 Admin Override
+      </button>
+    </div>
+  </footer>
+
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   FaultWall Live Dashboard — Core Logic
+   ═══════════════════════════════════════════════════════════════ */
+
+const API_BASE = 'http://localhost:8080';
+const MAX_FEED_ITEMS = 100;
+
+// ── State ──────────────────────────────────────────────────────
+let state = {
+  total: 0,
+  allowed: 0,
+  blocked: 0,
+  agents: {},       // { agentId: { allowed, blocked } }
+  feedCount: 0,
+  connected: false,
+};
+
+// ── Agent Color Palette ────────────────────────────────────────
+const AGENT_COLORS = [
+  { bg: 'rgba(88,166,255,0.15)',  fg: '#58a6ff',  dot: '#58a6ff'  },  // blue
+  { bg: 'rgba(63,185,80,0.15)',   fg: '#3fb950',  dot: '#3fb950'  },  // green
+  { bg: 'rgba(188,140,255,0.15)', fg: '#bc8cff',  dot: '#bc8cff'  },  // purple
+  { bg: 'rgba(255,166,87,0.15)',  fg: '#ffa657',  dot: '#ffa657'  },  // orange
+  { bg: 'rgba(57,208,216,0.15)',  fg: '#39d0d8',  dot: '#39d0d8'  },  // cyan
+  { bg: 'rgba(247,120,186,0.15)', fg: '#f778ba',  dot: '#f778ba'  },  // pink
+  { bg: 'rgba(210,153,34,0.15)',  fg: '#d29922',  dot: '#d29922'  },  // yellow
+];
+
+const agentColorMap = {};
+let colorIndex = 0;
+
+function getAgentColor(agentId) {
+  if (!agentColorMap[agentId]) {
+    agentColorMap[agentId] = AGENT_COLORS[colorIndex % AGENT_COLORS.length];
+    colorIndex++;
+  }
+  return agentColorMap[agentId];
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  const h = String(d.getHours()).padStart(2,'0');
+  const m = String(d.getMinutes()).padStart(2,'0');
+  const s = String(d.getSeconds()).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function bumpValue(elId) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.classList.remove('bump');
+  void el.offsetWidth;  // reflow
+  el.classList.add('bump');
+}
+
+// ── Update Stats Display ───────────────────────────────────────
+function updateStatsDisplay(data) {
+  const prevTotal   = parseInt(document.getElementById('stat-total').textContent)   || 0;
+  const prevAllowed = parseInt(document.getElementById('stat-allowed').textContent) || 0;
+  const prevBlocked = parseInt(document.getElementById('stat-blocked').textContent) || 0;
+
+  const total   = data.total_queries   ?? state.total;
+  const allowed = data.allowed_queries ?? state.allowed;
+  const blocked = data.blocked_queries ?? state.blocked;
+  const agentCount = Object.keys(state.agents).length;
+
+  document.getElementById('stat-total').textContent   = total;
+  document.getElementById('stat-allowed').textContent = allowed;
+  document.getElementById('stat-blocked').textContent = blocked;
+  document.getElementById('stat-agents').textContent  = agentCount;
+
+  if (total > 0) {
+    document.getElementById('stat-allowed-pct').textContent =
+      `${Math.round(allowed / total * 100)}% pass rate`;
+    document.getElementById('stat-blocked-pct').textContent =
+      `${Math.round(blocked / total * 100)}% block rate`;
+  }
+
+  if (total   !== prevTotal)   bumpValue('stat-total');
+  if (allowed !== prevAllowed) bumpValue('stat-allowed');
+  if (blocked !== prevBlocked) {
+    bumpValue('stat-blocked');
+    // Pulse the blocked card
+    const card = document.querySelector('.stat-card.blocked');
+    card.classList.remove('pulsing');
+    void card.offsetWidth;
+    card.classList.add('pulsing');
+  }
+  if (agentCount !== parseInt(document.getElementById('stat-agents').dataset.prev || '0')) {
+    bumpValue('stat-agents');
+    document.getElementById('stat-agents').dataset.prev = agentCount;
+  }
+}
+
+// ── Render Agent Breakdown ─────────────────────────────────────
+function renderAgents() {
+  const list = document.getElementById('agent-list');
+  const empty = document.getElementById('agent-empty');
+  const agents = state.agents;
+  const ids = Object.keys(agents);
+
+  document.getElementById('agent-count').textContent = `${ids.length} agent${ids.length !== 1 ? 's' : ''}`;
+
+  if (ids.length === 0) {
+    empty.style.display = 'block';
+    // Remove all agent cards
+    list.querySelectorAll('.agent-card').forEach(el => el.remove());
+    return;
+  }
+  empty.style.display = 'none';
+
+  ids.forEach(id => {
+    const stats = agents[id];
+    const total = stats.allowed + stats.blocked;
+    const allowedPct = total > 0 ? (stats.allowed / total * 100) : 0;
+    const blockedPct = total > 0 ? (stats.blocked / total * 100) : 0;
+    const color = getAgentColor(id);
+
+    let card = document.getElementById(`agent-card-${CSS.escape(id)}`);
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'agent-card';
+      card.id = `agent-card-${id.replace(/[^a-z0-9]/gi, '-')}`;
+      card.innerHTML = `
+        <div class="agent-card-header">
+          <div class="agent-name-wrap">
+            <div class="agent-dot" style="background:${color.dot}"></div>
+            <span class="agent-name">${esc(id)}</span>
+          </div>
+          <span class="agent-total" id="agt-total-${esc(id)}">0 queries</span>
+        </div>
+        <div class="agent-counts">
+          <div class="agent-count-item">
+            <div class="dot" style="background:#3fb950"></div>
+            <span style="color:var(--text-secondary)">Allow:</span>
+            <span class="count-val" style="color:var(--green)" id="agt-allowed-${esc(id)}">0</span>
+          </div>
+          <div class="agent-count-item">
+            <div class="dot" style="background:#f85149"></div>
+            <span style="color:var(--text-secondary)">Block:</span>
+            <span class="count-val" style="color:var(--red)" id="agt-blocked-${esc(id)}">0</span>
+          </div>
+        </div>
+        <div class="agent-bar-track">
+          <div class="agent-bar-allowed" id="agt-bar-a-${esc(id)}" style="width:0%"></div>
+          <div class="agent-bar-blocked" id="agt-bar-b-${esc(id)}" style="width:0%"></div>
+        </div>
+      `;
+      list.appendChild(card);
+    }
+
+    // Update values
+    const safeId = id; // Already set via esc in IDs
+    const totalEl    = document.getElementById(`agt-total-${id}`);
+    const allowedEl  = document.getElementById(`agt-allowed-${id}`);
+    const blockedEl  = document.getElementById(`agt-blocked-${id}`);
+    const barAllowed = document.getElementById(`agt-bar-a-${id}`);
+    const barBlocked = document.getElementById(`agt-bar-b-${id}`);
+
+    if (totalEl)    totalEl.textContent    = `${total} quer${total !== 1 ? 'ies' : 'y'}`;
+    if (allowedEl)  allowedEl.textContent  = stats.allowed;
+    if (blockedEl)  blockedEl.textContent  = stats.blocked;
+    if (barAllowed) barAllowed.style.width = `${allowedPct}%`;
+    if (barBlocked) barBlocked.style.width = `${blockedPct}%`;
+  });
+}
+
+// ── Add Feed Item ──────────────────────────────────────────────
+function addFeedItem(event) {
+  const feedList = document.getElementById('feed-list');
+  const empty = document.getElementById('feed-empty');
+  empty.style.display = 'none';
+
+  state.feedCount++;
+  document.getElementById('feed-count').textContent =
+    `${state.feedCount} event${state.feedCount !== 1 ? 's' : ''}`;
+
+  const isBlocked = event.status === 'blocked' || event.allowed === false;
+  const isAllowed = !isBlocked;
+  const agentId   = event.agent_id || event.agent || 'unknown';
+  const query     = event.query    || event.sql   || '(no query)';
+  const reason    = event.reason   || '';
+  const ts        = formatTime(event.timestamp);
+  const color     = getAgentColor(agentId);
+
+  // Update agent state
+  if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
+  if (isAllowed) {
+    state.agents[agentId].allowed++;
+    state.total++;
+    state.allowed++;
+  } else {
+    state.agents[agentId].blocked++;
+    state.total++;
+    state.blocked++;
+  }
+
+  const item = document.createElement('div');
+  item.className = `feed-item ${isAllowed ? 'allowed-flash' : 'blocked-flash'} ${isBlocked ? 'is-blocked' : ''}`;
+
+  item.innerHTML = `
+    <span class="feed-time">${esc(ts)}</span>
+    <span class="agent-badge" style="background:${color.bg}; color:${color.fg}; border: 1px solid ${color.fg}30">${esc(agentId)}</span>
+    <div class="feed-query-wrap">
+      <div class="feed-query" title="${esc(query)}">${esc(query)}</div>
+      ${reason ? `<div class="feed-reason">⚠ ${esc(reason)}</div>` : ''}
+    </div>
+    <div class="feed-status ${isAllowed ? 'allowed' : 'blocked'}">${isAllowed ? '✓' : '✕'}</div>
+  `;
+
+  // Prepend (newest on top)
+  feedList.insertBefore(item, feedList.children[1] || null);
+
+  // Prune old items
+  const items = feedList.querySelectorAll('.feed-item');
+  if (items.length > MAX_FEED_ITEMS) {
+    items[items.length - 1].remove();
+  }
+
+  // Update stats display from local state
+  updateStatsDisplay({ total_queries: state.total, allowed_queries: state.allowed, blocked_queries: state.blocked });
+  renderAgents();
+}
+
+// ── SSE Connection ─────────────────────────────────────────────
+let sseRetryDelay = 2000;
+let sseRetryTimer = null;
+
+function connectSSE() {
+  const statusEl = document.getElementById('connection-status');
+  const badge    = document.getElementById('live-badge');
+  const liveText = document.getElementById('live-text');
+
+  statusEl.textContent = 'Connecting to SSE…';
+
+  let es;
+  try {
+    es = new EventSource(`${API_BASE}/events`);
+  } catch(e) {
+    scheduleSSERetry();
+    return;
+  }
+
+  es.onopen = () => {
+    state.connected = true;
+    sseRetryDelay = 2000;
+    badge.classList.remove('disconnected');
+    liveText.textContent = 'LIVE';
+    statusEl.textContent = 'SSE connected';
+    showToast('Connected to FaultWall', 'success');
+  };
+
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'query' || data.query || data.sql) {
+        addFeedItem(data);
+      } else if (data.type === 'stats') {
+        updateStatsDisplay(data);
+      }
+    } catch(err) {
+      console.warn('SSE parse error', err, e.data);
+    }
+  };
+
+  // Also listen for named event types
+  ['query', 'event', 'blocked', 'allowed'].forEach(evtType => {
+    es.addEventListener(evtType, (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addFeedItem({ ...data, type: evtType });
+      } catch(err) {
+        console.warn('SSE named event parse error', err);
+      }
+    });
+  });
+
+  es.onerror = () => {
+    state.connected = false;
+    badge.classList.add('disconnected');
+    liveText.textContent = 'OFFLINE';
+    statusEl.textContent = `Reconnecting in ${sseRetryDelay/1000}s…`;
+    es.close();
+    scheduleSSERetry();
+  };
+}
+
+function scheduleSSERetry() {
+  clearTimeout(sseRetryTimer);
+  sseRetryTimer = setTimeout(() => {
+    connectSSE();
+    sseRetryDelay = Math.min(sseRetryDelay * 1.5, 15000);
+  }, sseRetryDelay);
+}
+
+// ── Stats Polling ──────────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const resp = await fetch(`${API_BASE}/stats`, { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    updateStatsDisplay(data);
+
+    // Merge per-agent stats from API
+    if (data.agents) {
+      Object.entries(data.agents).forEach(([id, agentData]) => {
+        if (!state.agents[id]) state.agents[id] = { allowed: 0, blocked: 0 };
+        // Use API values as source of truth if they're higher
+        if ((agentData.allowed || 0) > state.agents[id].allowed)
+          state.agents[id].allowed = agentData.allowed || 0;
+        if ((agentData.blocked || 0) > state.agents[id].blocked)
+          state.agents[id].blocked = agentData.blocked || 0;
+      });
+      renderAgents();
+    }
+
+    // Sync totals
+    if (data.total_queries !== undefined) {
+      state.total   = data.total_queries   || 0;
+      state.allowed = data.allowed_queries || 0;
+      state.blocked = data.blocked_queries || 0;
+    }
+
+  } catch(e) {
+    // silently ignore fetch errors
+  }
+}
+
+// ── Simulate Attack Buttons ────────────────────────────────────
+async function fireQuery(agentId, query, btn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('firing');
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.classList.remove('firing');
+  }, 800);
+
+  try {
+    const resp = await fetch(`${API_BASE}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId, query: query }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      // If SSE doesn't deliver it, add it manually
+      if (!state.connected) {
+        addFeedItem({
+          agent_id: agentId,
+          query: query,
+          status: data.allowed === false ? 'blocked' : 'allowed',
+          allowed: data.allowed,
+          reason: data.reason || '',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      showToast(
+        data.allowed === false
+          ? `🚫 Blocked: ${data.reason || 'policy violation'}`
+          : `✅ Query allowed for ${agentId}`,
+        data.allowed === false ? 'error' : 'success'
+      );
+    } else {
+      showToast(`HTTP ${resp.status} from FaultWall`, 'error');
+    }
+  } catch(e) {
+    showToast(`Failed to reach FaultWall: ${e.message}`, 'error');
+  }
+}
+
+// ── Toast ──────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.animation = 'toastOut 0.3s ease forwards';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ── Init ───────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  connectSSE();
+  fetchStats();
+  setInterval(fetchStats, 2000);
+});
+</script>
+</body>
+</html>

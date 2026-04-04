@@ -1,0 +1,85 @@
+version: "3.9"
+
+networks:
+  faultwall-net:
+    driver: bridge
+
+services:
+  # ─────────────────────────────────────────────
+  # PostgreSQL 16 — the protected database
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: fw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo123
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - faultwall-net
+
+  # ─────────────────────────────────────────────
+  # FaultWall — the agentic data firewall proxy
+  # :5433 → PostgreSQL proxy (agents connect here)
+  # :8080 → REST audit/dashboard API
+  # ─────────────────────────────────────────────
+  faultwall:
+    build:
+      context: ./faultwall
+      dockerfile: Dockerfile
+    container_name: fw-proxy
+    restart: unless-stopped
+    environment:
+      # Upstream PostgreSQL connection
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_DATABASE: demo
+      PG_USER: demo
+      PG_PASSWORD: demo123
+      # FaultWall config
+      PROXY_PORT: "5433"
+      API_PORT: "8080"
+      POLICY_FILE: /etc/faultwall/policy.yaml
+      LOG_LEVEL: info
+    ports:
+      - "5433:5433"   # Agents connect here (SQL proxy)
+      - "8080:8080"   # Dashboard API (REST + SSE)
+    volumes:
+      - ./policy.yaml:/etc/faultwall/policy.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - faultwall-net
+
+  # ─────────────────────────────────────────────
+  # Dashboard — live query log & visualizer
+  # ─────────────────────────────────────────────
+  dashboard:
+    image: nginx:alpine
+    container_name: fw-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./dashboard/index.html:/usr/share/nginx/html/index.html:ro
+      - ./dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - faultwall
+    networks:
+      - faultwall-net
+
+volumes:
+  pgdata:
+    driver: local

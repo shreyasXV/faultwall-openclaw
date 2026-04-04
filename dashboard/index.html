@@ -1199,8 +1199,8 @@ async function pollViolations() {
 }
 
 // ── Simulate Attack Buttons ────────────────────────────────────
-// FaultWall is a wire-protocol proxy — queries go through psql on port 5433,
-// not through REST. Attack buttons simulate in demo mode or show psql commands.
+// Buttons POST to /execute → query-executor → psql through FaultWall proxy (port 5433)
+// Falls back to local simulation if executor is unreachable
 async function fireQuery(agentId, query, btn) {
   if (btn.disabled) return;
   btn.disabled = true;
@@ -1211,81 +1211,88 @@ async function fireQuery(agentId, query, btn) {
     btn.classList.remove('firing');
   }, 800);
 
-  // Determine if this query would be blocked based on common patterns
+  // Try the real executor first (runs psql through FaultWall wire protocol)
+  try {
+    const resp = await fetch(`${API_BASE}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId, query: query }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+
+      addFeedItem({
+        agent_id: agentId,
+        query: query,
+        status: data.blocked ? 'blocked' : 'allowed',
+        action: data.blocked ? 'blocked' : 'allowed',
+        reason: data.blocked ? data.output.substring(0, 120) : '',
+        timestamp: data.timestamp || new Date().toISOString(),
+      });
+
+      if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
+      if (data.blocked) {
+        state.agents[agentId].blocked++;
+        state.blocked++;
+      } else {
+        state.agents[agentId].allowed++;
+        state.allowed++;
+      }
+      state.total++;
+      updateStatsDisplay();
+      renderAgents();
+
+      showToast(
+        data.blocked
+          ? `🚫 BLOCKED by FaultWall: ${query.substring(0, 40)}…`
+          : `✅ Allowed for ${agentId}`,
+        data.blocked ? 'error' : 'success'
+      );
+
+      // Poll for fresh data from FaultWall API
+      setTimeout(() => { pollViolations(); pollAgents(); }, 500);
+      return;
+    }
+  } catch(e) {
+    // Executor unreachable — fall through to demo mode
+  }
+
+  // Demo mode fallback — simulate locally
   const dangerOps = /DROP|DELETE|TRUNCATE|ALTER|INSERT INTO.*secrets/i;
   const secretsTables = /\bsecrets\b/i;
   const isAdmin = agentId === 'admin-agent';
   const isDangerous = dangerOps.test(query) || secretsTables.test(query);
   const wouldBlock = isDangerous && !isAdmin;
 
-  if (state.connected && !state.demoMode) {
-    // In live mode: the buttons can't send queries through the wire protocol.
-    // Instead, show the psql command and trigger a poll to pick up results.
-    const psqlCmd = `PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d faultwall_demo -c "${query}" --set=application_name=${agentId}`;
+  addFeedItem({
+    agent_id: agentId,
+    query: query,
+    status: wouldBlock ? 'blocked' : 'allowed',
+    action: wouldBlock ? 'blocked' : 'allowed',
+    reason: wouldBlock ? (secretsTables.test(query) ? 'Blocked table: secrets' : `Blocked operation: ${query.split(' ')[0]}`) : '',
+    timestamp: new Date().toISOString(),
+  });
 
-    // Add to feed as a "pending" item
-    addFeedItem({
-      agent_id: agentId,
-      query: query,
-      status: wouldBlock ? 'blocked' : 'allowed',
-      action: wouldBlock ? 'blocked' : 'allowed',
-      reason: wouldBlock ? 'Simulated — run via psql or attack-demo.sh for real interception' : '',
-      timestamp: new Date().toISOString(),
-    });
-
-    // Update local counters for immediate visual feedback
-    if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
-    if (wouldBlock) {
-      state.agents[agentId].blocked++;
-      state.blocked++;
-    } else {
-      state.agents[agentId].allowed++;
-      state.allowed++;
-    }
-    state.total++;
-    updateStatsDisplay();
-    renderAgents();
-
-    showToast(
-      wouldBlock
-        ? `🚫 Would be blocked: ${query.substring(0, 40)}…`
-        : `✅ Would be allowed for ${agentId}`,
-      wouldBlock ? 'error' : 'success'
-    );
-
-    // Trigger immediate poll to pick up any real results
-    setTimeout(() => { pollViolations(); pollAgents(); }, 500);
-
+  if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
+  if (wouldBlock) {
+    state.agents[agentId].blocked++;
+    state.blocked++;
   } else {
-    // Demo mode — simulate locally
-    addFeedItem({
-      agent_id: agentId,
-      query: query,
-      status: wouldBlock ? 'blocked' : 'allowed',
-      action: wouldBlock ? 'blocked' : 'allowed',
-      reason: wouldBlock ? (secretsTables.test(query) ? 'Blocked table: secrets' : `Blocked operation: ${query.split(' ')[0]}`) : '',
-      timestamp: new Date().toISOString(),
-    });
-
-    if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
-    if (wouldBlock) {
-      state.agents[agentId].blocked++;
-      state.blocked++;
-    } else {
-      state.agents[agentId].allowed++;
-      state.allowed++;
-    }
-    state.total++;
-    updateStatsDisplay();
-    renderAgents();
-
-    showToast(
-      wouldBlock
-        ? `🚫 Blocked: ${secretsTables.test(query) ? 'blocked table access' : 'dangerous operation'}`
-        : `✅ Query allowed for ${agentId}`,
-      wouldBlock ? 'error' : 'success'
-    );
+    state.agents[agentId].allowed++;
+    state.allowed++;
   }
+  state.total++;
+  updateStatsDisplay();
+  renderAgents();
+
+  showToast(
+    wouldBlock
+      ? `🚫 Blocked: ${secretsTables.test(query) ? 'blocked table access' : 'dangerous operation'}`
+      : `✅ Query allowed for ${agentId}`,
+    wouldBlock ? 'error' : 'success'
+  );
 }
 
 // ── Toast ──────────────────────────────────────────────────────

@@ -14,11 +14,24 @@ description: >
 
 All PostgreSQL access routes through FaultWall — a wire-protocol proxy that enforces YAML policies per agent, logs every query, and blocks unsafe operations before they reach the database.
 
+## First-time setup
+
+If `~/.faultwall/policies.yaml` does not exist yet, **help the user configure it before connecting**:
+
+1. Run `bash {baseDir}/scripts/setup.sh` to install FaultWall and create a default policy.
+2. Ask the user:
+   - What is your database name and which port is PostgreSQL running on?
+   - Which agents will access the database? (e.g., their names/IDs)
+   - Which tables contain sensitive data that agents should NOT access? (e.g., users, payments, secrets)
+   - Which SQL operations should be blocked? (DROP and TRUNCATE are always recommended to block)
+3. Edit `~/.faultwall/policies.yaml` with their answers. Follow the format in `{baseDir}/references/policy-guide.md`.
+4. If FaultWall is already running, reload policies: `curl -X POST http://localhost:8080/api/policies/reload`
+
 ## Before any database operation
 
 1. **Ensure the proxy is running.** Check if port 5433 is listening; if not, run:
    ```bash
-   bash skill/scripts/setup.sh
+   bash {baseDir}/scripts/setup.sh
    ```
 
 2. **Always connect on port 5433** (FaultWall proxy), never directly on 5432.
@@ -55,4 +68,4 @@ API endpoints:
 
 ## Customizing policies
 
-See `skill/references/policy-guide.md` to add agents, restrict tables, define missions, or tighten/loosen rules. Edit `~/.faultwall/policies.yaml` and reload with `POST /api/policies/reload`.
+See `{baseDir}/references/policy-guide.md` to add agents, restrict tables, define missions, or tighten/loosen rules. Edit `~/.faultwall/policies.yaml` and reload with `POST /api/policies/reload`.

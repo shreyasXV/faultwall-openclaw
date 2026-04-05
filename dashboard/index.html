@@ -852,20 +852,20 @@
   <footer id="attack-panel">
     <div id="attack-label">Simulate Attack</div>
     <div id="attack-buttons">
-      <button class="attack-btn safe" onclick="fireQuery('data-analyst', 'SELECT id, name FROM users LIMIT 10', this)">
+      <button class="attack-btn safe" onclick="fireQuery('openclaw-coder', 'SELECT id, name FROM products LIMIT 10', this, 'oc-coder-secret-abc', 'query-products')">
         ✅ Safe Query (SELECT)
       </button>
-      <button class="attack-btn danger" onclick="fireQuery('data-analyst', 'SELECT * FROM secrets', this)">
-        🔓 Steal Secrets
+      <button class="attack-btn danger" onclick="fireQuery('openclaw-coder', 'SELECT * FROM users LIMIT 5', this, 'oc-coder-secret-abc', 'query-products')">
+        🔓 Steal PII (users table)
       </button>
-      <button class="attack-btn danger" onclick="fireQuery('default', 'DROP TABLE customers', this)">
+      <button class="attack-btn danger" onclick="fireQuery('openclaw-coder', 'DROP TABLE products', this, 'oc-coder-secret-abc', 'query-products')">
         💣 Drop Table Attack
       </button>
-      <button class="attack-btn danger" onclick="fireQuery('data-analyst', 'DELETE FROM orders WHERE 1=1', this)">
-        🗑️ Delete All Orders
+      <button class="attack-btn danger" onclick="fireQuery('openclaw-coder', 'DELETE FROM products WHERE 1=1', this, 'oc-coder-secret-abc', 'query-products')">
+        🗑️ Delete All Products
       </button>
-      <button class="attack-btn admin" onclick="fireQuery('admin-agent', 'DROP TABLE customers', this)">
-        👑 Admin Override
+      <button class="attack-btn admin" onclick="fireQuery('rogue-agent', 'SELECT * FROM payments', this, '', '')">
+        👑 Rogue Agent (no auth)
       </button>
     </div>
   </footer>
@@ -1137,14 +1137,23 @@ async function pollAgents() {
         const violations = agent.violations || 0;
         const allowed = queries - violations;
 
-        if (!state.agents[id]) state.agents[id] = { allowed: 0, blocked: 0 };
-        state.agents[id].allowed = Math.max(allowed, 0);
-        state.agents[id].blocked = violations;
+        if (!state.agents[id]) state.agents[id] = { allowed: 0, blocked: 0, localAllowed: 0, localBlocked: 0 };
+        // API is source of truth — store API values + add local simulation counts on top
+        state.agents[id].allowed = Math.max(allowed, 0) + (state.agents[id].localAllowed || 0);
+        state.agents[id].blocked = violations + (state.agents[id].localBlocked || 0);
 
         totalQueries += queries;
         totalViolations += violations;
       });
     }
+
+    // Include agents that only exist locally (from simulation buttons)
+    Object.keys(state.agents).forEach(id => {
+      const agent = state.agents[id];
+      if (data.agents && data.agents.some(a => a.agent_id === id)) return; // already counted
+      totalQueries += (agent.localAllowed || 0) + (agent.localBlocked || 0);
+      totalViolations += (agent.localBlocked || 0);
+    });
 
     state.total = totalQueries;
     state.blocked = totalViolations;
@@ -1201,7 +1210,7 @@ async function pollViolations() {
 // ── Simulate Attack Buttons ────────────────────────────────────
 // Buttons POST to /execute → query-executor → psql through FaultWall proxy (port 5433)
 // Falls back to local simulation if executor is unreachable
-async function fireQuery(agentId, query, btn) {
+async function fireQuery(agentId, query, btn, token, mission) {
   if (btn.disabled) return;
   btn.disabled = true;
   btn.classList.add('firing');
@@ -1213,10 +1222,10 @@ async function fireQuery(agentId, query, btn) {
 
   // Try the real executor first (runs psql through FaultWall wire protocol)
   try {
-    const resp = await fetch(`${API_BASE}/execute`, {
+    const resp = await fetch(`http://localhost:9090/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: agentId, query: query }),
+      body: JSON.stringify({ agent_id: agentId, query: query, token: token || '', mission: mission || 'demo-attack' }),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -1232,18 +1241,9 @@ async function fireQuery(agentId, query, btn) {
         timestamp: data.timestamp || new Date().toISOString(),
       });
 
-      if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
-      if (data.blocked) {
-        state.agents[agentId].blocked++;
-        state.blocked++;
-      } else {
-        state.agents[agentId].allowed++;
-        state.allowed++;
-      }
-      state.total++;
-      updateStatsDisplay();
-      renderAgents();
-
+      if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0, localAllowed: 0, localBlocked: 0 };
+      // Don't increment local counters for real executor — pollAgents will pick up the API values
+      // But do a quick poll to refresh immediately
       showToast(
         data.blocked
           ? `🚫 BLOCKED by FaultWall: ${query.substring(0, 40)}…`
@@ -1275,11 +1275,13 @@ async function fireQuery(agentId, query, btn) {
     timestamp: new Date().toISOString(),
   });
 
-  if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0 };
+  if (!state.agents[agentId]) state.agents[agentId] = { allowed: 0, blocked: 0, localAllowed: 0, localBlocked: 0 };
   if (wouldBlock) {
+    state.agents[agentId].localBlocked = (state.agents[agentId].localBlocked || 0) + 1;
     state.agents[agentId].blocked++;
     state.blocked++;
   } else {
+    state.agents[agentId].localAllowed = (state.agents[agentId].localAllowed || 0) + 1;
     state.agents[agentId].allowed++;
     state.allowed++;
   }

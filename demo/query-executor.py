@@ -62,18 +62,23 @@ class QueryHandler(BaseHTTPRequestHandler):
             return
 
         # Build application_name in FaultWall's format
-        app_name = f"agent:{agent_id}:mission:demo-attack"
+        # Include token so FaultWall identifies the agent correctly
+        token = data.get("token", "")
+        mission = data.get("mission", "demo-attack")
+        app_name = f"agent:{agent_id}:mission:{mission}"
+        if token:
+            app_name += f":token:{token}"
 
         # Execute through psql → FaultWall proxy
+        # Use connection string to set application_name at connect time
+        connstr = f"host={PROXY_HOST} port={PROXY_PORT} user={PG_USER} dbname={PG_DB} application_name={app_name}"
+        if PG_PASS:
+            connstr += f" password={PG_PASS}"
         try:
             result = subprocess.run(
                 [
                     "psql",
-                    "-h", PROXY_HOST,
-                    "-p", PROXY_PORT,
-                    "-U", PG_USER,
-                    "-d", PG_DB,
-                    f"--set=application_name={app_name}",
+                    connstr,
                     "-c", query,
                 ],
                 env={**os.environ, "PGPASSWORD": PG_PASS},

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FaultWall — Live DB State</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --border: #262626;
+    --red: #ef4444;
+    --green: #10b981;
+    --yellow: #f59e0b;
+    --text: #f5f5f5;
+    --muted: #737373;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Courier New', monospace;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+  }
+  .wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 32px;
+    width: 100%;
+    max-width: 1600px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 48px 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 340px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card .label {
+    color: var(--muted);
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .card .count {
+    font-size: 140px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    transition: color 200ms ease;
+  }
+  .card .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 20px;
+  }
+  .card.healthy .count { color: var(--green); }
+  .card.dropped .count { color: var(--red); }
+  .card.loading .count { color: var(--yellow); }
+
+  .card.dropped::before {
+    content: 'DROPPED';
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: var(--red);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .footer {
+    position: fixed;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .footer .live {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--green);
+    border-radius: 50%;
+    margin-right: 6px;
+    animation: pulse 1.5s ease-in-out infinite;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card loading" id="users-card">
+      <div class="label">public.users</div>
+      <div class="count" id="users-count">—</div>
+      <div class="sub">rows including PII</div>
+    </div>
+    <div class="card loading" id="payments-card">
+      <div class="label">public.payments</div>
+      <div class="count" id="payments-count">—</div>
+      <div class="sub">financial records</div>
+    </div>
+    <div class="card loading" id="feedback-card">
+      <div class="label">public.feedback</div>
+      <div class="count" id="feedback-count">—</div>
+      <div class="sub">public data</div>
+    </div>
+  </div>
+  <div class="footer">
+    <span class="live"></span> POLLING LIVE &mdash; <span id="ts">—</span>
+  </div>
+
+<script>
+(function () {
+  const POLL_MS = 500;
+
+  function setCard(id, count) {
+    const card = document.getElementById(id + '-card');
+    const el = document.getElementById(id + '-count');
+    if (count === -1) {
+      card.className = 'card dropped';
+      el.textContent = '0';
+    } else {
+      card.className = 'card healthy';
+      el.textContent = String(count);
+    }
+  }
+
+  async function tick() {
+    try {
+      const res = await fetch('/count', { cache: 'no-store' });
+      const j = await res.json();
+      setCard('users', j.users);
+      setCard('payments', j.payments);
+      setCard('feedback', j.feedback);
+      document.getElementById('ts').textContent = new Date(j.ts).toLocaleTimeString();
+    } catch (e) {
+      // backend down — leave last values as-is
+    }
+  }
+
+  tick();
+  setInterval(tick, POLL_MS);
+})();
+</script>
+</body>
+</html>

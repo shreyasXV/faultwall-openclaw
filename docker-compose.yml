@@ -79,5 +79,43 @@ services:
       - faultwall-monitor
       - query-executor
 
+  # pgweb — Postgres web UI for the "watch the table disappear" demo beat.
+  # http://localhost:8081  (auto-connected to the demo DB; read/write)
+  # Intentionally points directly at Postgres (not the FaultWall proxy) so the
+  # visualization always reflects true DB state, independent of policy layer.
+  pgweb:
+    image: sosedoff/pgweb:latest
+    ports:
+      - "8081:8081"
+    environment:
+      DATABASE_URL: postgres://ghost:ghostpass@postgres:5432/faultwall_demo?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    command: ["pgweb", "--bind=0.0.0.0", "--listen=8081"]
+
+  # viz — live row-count counter overlay for the "without-vs-with" split screen.
+  # http://localhost:8082  (three big numbers: users, payments, feedback)
+  # Polls Postgres directly every 500ms. When a table is dropped, the counter
+  # flips to 0 with a red DROPPED badge. Designed for full-screen on a second
+  # monitor during the demo shoot.
+  viz:
+    build:
+      context: ./viz
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: ghost
+      PG_PASS: ghostpass
+      PG_DB: faultwall_demo
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
 volumes:
   pg_data:

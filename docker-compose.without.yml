@@ -1,0 +1,40 @@
+# FaultWall Demo — Without/With Overlay
+#
+# Use this overlay with the base docker-compose.yml to enable the split-screen
+# "Without FaultWall / With FaultWall" demo:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.without.yml up -d
+#
+# It adds a second query-executor on port 9091 that talks DIRECTLY to Postgres,
+# bypassing the FaultWall proxy. The demo flow:
+#
+#   1. Left pane: pgweb shows users table with rows (http://localhost:8081)
+#   2. Center: row counter shows users=10, payments=12 (http://localhost:8082)
+#   3. Right pane: send DROP TABLE to port 9091 (no FaultWall)
+#      → counter flips to 0, pgweb shows empty/missing table
+#   4. Reset Postgres volume (docker compose down -v && up -d)
+#   5. Re-run same DROP TABLE against port 9090 (with FaultWall)
+#      → blocked, counter stays at 10, pgweb unchanged
+#
+# This variant is meant only for demo video shoots. Do not run in production.
+
+services:
+  # Direct executor that bypasses FaultWall. Talks to Postgres on 5432 directly.
+  # Same agent identity format as the protected executor — the only difference
+  # is the target connection. Queries always succeed (no policy layer).
+  query-executor-direct:
+    build:
+      context: ./demo
+      dockerfile: Dockerfile.executor
+    ports:
+      - "9091:9090"
+    environment:
+      PROXY_HOST: postgres          # directly at Postgres, no proxy
+      PROXY_PORT: "5432"
+      PG_USER: ghost
+      PG_PASS: ghostpass
+      PG_DB: faultwall_demo
+      EXECUTOR_LABEL: "UNPROTECTED"
+    depends_on:
+      postgres:
+        condition: service_healthy

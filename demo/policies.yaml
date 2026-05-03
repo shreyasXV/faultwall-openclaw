@@ -114,6 +114,46 @@ agents:
       - public.users
       - pg_catalog.*
 
-# Unidentified connections (no agent: prefix in application_name)
+  # Demo agent for the YC video. Uses the short wire format
+  # `agent:support:m:ticket:t:xyz` (27 chars) to stay well under Postgres's
+  # 63-char application_name limit and avoid the cosmetic truncation NOTICE.
+  # Demonstrates column-level blocking: allowed to read users name/email, but
+  # blocked from SSN, password_hash, and api_key columns.
+  support:
+    description: "Customer support agent — reads users but cannot see PII columns"
+    auth_token: "xyz"
+    missions:
+      ticket:
+        tables:
+          - "public.users"
+          - "public.feedback"
+        max_rows: 500
+        max_query_time_ms: 3000
+
+    blocked_operations:
+      - DROP
+      - TRUNCATE
+      - DELETE
+      - ALTER
+      - CREATE
+      - GRANT
+
+    blocked_columns:
+      users:
+        - ssn
+        - password_hash
+        - api_key
+
+    blocked_tables:
+      - public.payments
+      - pg_catalog.*
+
+# Unidentified connections (no agent: prefix in application_name).
+#
+# SECURITY: Keep this as "deny" for any deployment where policy enforcement
+# matters. Using "monitor" here combined with default_policy: deny creates a
+# silent allow-by-default for any connection whose application_name fails to
+# parse as an agent identity — the connection falls through this path and is
+# logged but never blocked. That's a footgun. Deny is the correct default.
 unidentified:
-  policy: monitor
+  policy: deny

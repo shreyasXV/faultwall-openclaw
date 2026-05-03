@@ -36,9 +36,10 @@ banner() {
 wait_for_proxy() {
     echo -e "${YELLOW}⏳ Waiting for FaultWall proxy at ${PROXY_HOST}:${PROXY_PORT}...${RESET}"
     for i in $(seq 1 30); do
-        if PGPASSWORD="$PG_PASS" psql -h "$PROXY_HOST" -p "$PROXY_PORT" -U "$PG_USER" -d "$PG_DB" \
-            -o /dev/null -c "SELECT 1" \
-            --set=application_name="agent:openclaw-coder:mission:read-feedback:token:oc-coder-secret-abc" 2>/dev/null; then
+        if PGPASSWORD="$PG_PASS" \
+            PGAPPNAME="agent:openclaw-coder:mission:read-feedback:token:oc-coder-secret-abc" \
+            psql -h "$PROXY_HOST" -p "$PROXY_PORT" -U "$PG_USER" -d "$PG_DB" \
+            -o /dev/null -c "SELECT 1" 2>/dev/null; then
             echo -e "${GREEN}✅ Proxy is ready!${RESET}"
             echo ""
             return 0
@@ -53,8 +54,17 @@ wait_for_proxy() {
 run_query() {
     local app_name="$1"
     local query="$2"
-    PGPASSWORD="$PG_PASS" psql -h "$PROXY_HOST" -p "$PROXY_PORT" -U "$PG_USER" -d "$PG_DB" \
-        --set=application_name="$app_name" \
+    # CRITICAL: application_name must be set via PGAPPNAME env var (or connection
+    # string), NOT psql --set. The --set flag sets a psql client variable which
+    # is never sent to the server, so FaultWall sees application_name=psql and
+    # identity parsing silently fails. Documented in audit 2026-05-03.
+    # -o "-c client_min_messages=warning" suppresses the cosmetic truncation
+    # NOTICE Postgres emits for application_name > 63 chars (harmless — FaultWall
+    # reads the raw startup packet before PG truncates).
+    PGPASSWORD="$PG_PASS" \
+        PGAPPNAME="$app_name" \
+        psql -h "$PROXY_HOST" -p "$PROXY_PORT" -U "$PG_USER" -d "$PG_DB" \
+        -o "-c client_min_messages=warning" \
         -c "$query" 2>&1 || true
 }
 

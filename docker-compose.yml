@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -37,6 +35,14 @@ services:
         condition: service_healthy
     restart: on-failure
     command: ["/app/faultwall", "--proxy", "--listen", "0.0.0.0:5433", "--upstream", "postgres:5432", "--policies", "/app/policies.yaml"]
+    healthcheck:
+      # TCP check on the listen port. Waits until pgproto3 handshake goroutine
+      # is accepting connections. Other services can depend_on: service_healthy.
+      test: ["CMD-SHELL", "nc -z localhost 5433 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   faultwall-monitor:
     build: ./faultwall
@@ -66,7 +72,8 @@ services:
       PG_PASS: ghostpass
       PG_DB: faultwall_demo
     depends_on:
-      - faultwall-proxy
+      faultwall-proxy:
+        condition: service_healthy
 
   dashboard:
     image: nginx:alpine
@@ -84,7 +91,7 @@ services:
   # Intentionally points directly at Postgres (not the FaultWall proxy) so the
   # visualization always reflects true DB state, independent of policy layer.
   pgweb:
-    image: sosedoff/pgweb:latest
+    image: sosedoff/pgweb:0.16.2
     ports:
       - "8081:8081"
     environment:
